@@ -1,0 +1,10 @@
+title       = "coingecko"
+baseURL     = "https://coingecko-cli.tamnd.com/"
+description = "A command line for coingecko."
+contentDir  = "content"
+outputDir   = "public"
+theme       = "tago-doks"
+syntaxHighlight = "true"
+
+[params]
+github = "https://github.com/tamnd/coingecko-cli"
