@@ -2,28 +2,42 @@ package coingecko
 
 // Price is a coin's current price in a single currency.
 type Price struct {
-	ID       string  `kit:"id" json:"id"`
+	ID       string  `json:"id"       kit:"id"`
 	Currency string  `json:"currency"`
 	Price    float64 `json:"price"`
 }
 
-// Market is one entry from the /coins/markets listing.
-type Market struct {
-	ID        string `kit:"id" json:"id"`
-	Symbol    string `json:"symbol"`
-	Name      string `json:"name"`
-	Rank      int    `json:"rank"`
-	Price     string `json:"price"`
-	MarketCap string `json:"market_cap"`
-	Volume24h string `json:"volume_24h"`
-	High24h   string `json:"high_24h"`
-	Low24h    string `json:"low_24h"`
-	Change24h string `json:"change_24h_pct"`
+// TrendingCoin is one entry from the /search/trending response.
+type TrendingCoin struct {
+	ID            string  `json:"id"              kit:"id"`
+	Name          string  `json:"name"`
+	Symbol        string  `json:"symbol"`
+	MarketCapRank int     `json:"market_cap_rank"`
+	PriceBTC      float64 `json:"price_btc"`
+}
+
+// MarketCoin is one entry from the /coins/markets listing.
+type MarketCoin struct {
+	ID             string  `json:"id"                       kit:"id"`
+	Symbol         string  `json:"symbol"`
+	Name           string  `json:"name"`
+	CurrentPrice   float64 `json:"current_price"`
+	MarketCap      float64 `json:"market_cap"`
+	MarketCapRank  int     `json:"market_cap_rank"`
+	PriceChange24h float64 `json:"price_change_24h"`
+	TotalVolume    float64 `json:"total_volume"`
+}
+
+// CoinInfo is a minimal coin entry from the /coins/list endpoint.
+type CoinInfo struct {
+	ID     string `json:"id"     kit:"id"`
+	Symbol string `json:"symbol"`
+	Name   string `json:"name"`
 }
 
 // Coin is the full coin detail from /coins/{id}.
 type Coin struct {
-	ID          string `kit:"id" json:"id"`
+	ID          string `json:"id"          kit:"id"`
 	Symbol      string `json:"symbol"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -32,14 +46,6 @@ type Coin struct {
 	Volume24h   string `json:"volume_24h"`
 	High24h     string `json:"high_24h"`
 	Low24h      string `json:"low_24h"`
-}
-
-// Trending is one entry from the /search/trending response.
-type Trending struct {
-	ID     string `kit:"id" json:"id"`
-	Name   string `json:"name"`
-	Symbol string `json:"symbol"`
-	Rank   int    `json:"rank"`
 }
 
 // --- private decode types ---
@@ -81,8 +87,15 @@ type trendingCoinWrapper struct {
 }
 
 type trendingItem struct {
-	ID            string `json:"id"`
-	Symbol        string `json:"symbol"`
-	Name          string `json:"name"`
-	MarketCapRank int    `json:"market_cap_rank"`
+	ID            string  `json:"id"`
+	Symbol        string  `json:"symbol"`
+	Name          string  `json:"name"`
+	MarketCapRank int     `json:"market_cap_rank"`
+	PriceBTC      float64 `json:"price_btc"`
+}
+
+type apiCoinList struct {
+	ID     string `json:"id"`
+	Symbol string `json:"symbol"`
+	Name   string `json:"name"`
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/tamnd/coingecko-cli/coingecko"
@@ -22,8 +21,8 @@ func newTestClient(ts *httptest.Server) *coingecko.Client {
 // --- fixture JSON ---
 
 const fakePriceJSON = `{
-  "bitcoin": {"usd": 64080},
-  "ethereum": {"usd": 2430}
+  "bitcoin": {"usd": 64080, "eur": 56087},
+  "ethereum": {"usd": 2430, "eur": 2100}
 }`
 
 const fakeMarketsJSON = `[
@@ -71,16 +70,22 @@ const fakeCoinJSON = `{
 
 const fakeTrendingJSON = `{
   "coins": [
-    {"item": {"id": "pepe", "symbol": "PEPE", "name": "Pepe", "market_cap_rank": 30}},
-    {"item": {"id": "solana", "symbol": "SOL", "name": "Solana", "market_cap_rank": 5}}
+    {"item": {"id": "pepe", "symbol": "PEPE", "name": "Pepe", "market_cap_rank": 30, "price_btc": 0.0000001}},
+    {"item": {"id": "solana", "symbol": "SOL", "name": "Solana", "market_cap_rank": 5, "price_btc": 0.0012}}
   ],
   "nfts": [],
   "categories": []
 }`
 
+const fakeCoinsListJSON = `[
+  {"id": "bitcoin", "symbol": "btc", "name": "Bitcoin"},
+  {"id": "ethereum", "symbol": "eth", "name": "Ethereum"},
+  {"id": "solana", "symbol": "sol", "name": "Solana"}
+]`
+
 // --- price ---
 
-func TestPriceParsesCoins(t *testing.T) {
+func TestPriceSingleCurrency(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/simple/price" {
 			t.Errorf("unexpected path %q", r.URL.Path)
@@ -111,6 +116,50 @@ func TestPriceParsesCoins(t *testing.T) {
 	}
 	if prices[1].Price != 2430 {
 		t.Errorf("ethereum price = %v, want 2430", prices[1].Price)
+	}
+}
+
+func TestPriceMultipleCurrencies(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, fakePriceJSON)
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	// bitcoin in usd and eur -> 2 Price records
+	prices, err := c.Price(context.Background(), []string{"bitcoin"}, "usd", "eur")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prices) != 2 {
+		t.Fatalf("len(prices) = %d, want 2 (one per currency)", len(prices))
+	}
+	if prices[0].Currency != "usd" {
+		t.Errorf("prices[0].Currency = %q, want usd", prices[0].Currency)
+	}
+	if prices[1].Currency != "eur" {
+		t.Errorf("prices[1].Currency = %q, want eur", prices[1].Currency)
+	}
+	if prices[1].Price != 56087 {
+		t.Errorf("bitcoin EUR price = %v, want 56087", prices[1].Price)
+	}
+}
+
+func TestPriceDefaultsCurrencyToUSD(t *testing.T) {
+	var gotCurr string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCurr = r.URL.Query().Get("vs_currencies")
+		_, _ = fmt.Fprint(w, `{"bitcoin":{"usd":64080}}`)
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	_, err := c.Price(context.Background(), []string{"bitcoin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotCurr != "usd" {
+		t.Errorf("vs_currencies = %q, want usd", gotCurr)
 	}
 }
 
@@ -152,20 +201,23 @@ func TestMarketsParsesItems(t *testing.T) {
 	if items[0].Symbol != "btc" {
 		t.Errorf("items[0].Symbol = %q, want btc", items[0].Symbol)
 	}
-	if items[0].Rank != 1 {
-		t.Errorf("items[0].Rank = %d, want 1", items[0].Rank)
+	if items[0].MarketCapRank != 1 {
+		t.Errorf("items[0].MarketCapRank = %d, want 1", items[0].MarketCapRank)
 	}
-	// Price is formatted as a string
-	if items[0].Price != "64079.00" {
-		t.Errorf("items[0].Price = %q, want 64079.00", items[0].Price)
+	if items[0].CurrentPrice != 64079 {
+		t.Errorf("items[0].CurrentPrice = %v, want 64079", items[0].CurrentPrice)
 	}
-	// Change24h should have a percent sign
-	if !strings.HasSuffix(items[0].Change24h, "%") {
-		t.Errorf("items[0].Change24h = %q, expected percent sign", items[0].Change24h)
+	if items[0].MarketCap != 1261234567890 {
+		t.Errorf("items[0].MarketCap = %v, want 1261234567890", items[0].MarketCap)
 	}
-	// Negative change for ethereum
-	if !strings.HasPrefix(items[1].Change24h, "-") {
-		t.Errorf("items[1].Change24h = %q, expected negative", items[1].Change24h)
+	if items[0].TotalVolume != 18234567890 {
+		t.Errorf("items[0].TotalVolume = %v, want 18234567890", items[0].TotalVolume)
+	}
+	if items[0].PriceChange24h != 1.23 {
+		t.Errorf("items[0].PriceChange24h = %v, want 1.23", items[0].PriceChange24h)
+	}
+	if items[1].PriceChange24h != -0.5 {
+		t.Errorf("items[1].PriceChange24h = %v, want -0.5", items[1].PriceChange24h)
 	}
 }
 
@@ -205,7 +257,7 @@ func TestMarketsPassesPageParam(t *testing.T) {
 	}
 }
 
-// --- coin ---
+// --- coin detail ---
 
 func TestCoinParsesDetail(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -242,7 +294,10 @@ func TestCoinParsesDetail(t *testing.T) {
 }
 
 func TestCoinDescriptionTruncated(t *testing.T) {
-	longDesc := strings.Repeat("x", 500)
+	longDesc := make([]byte, 500)
+	for i := range longDesc {
+		longDesc[i] = 'x'
+	}
 	coinJSON := fmt.Sprintf(`{
   "id": "testcoin", "symbol": "tc", "name": "Test",
   "description": {"en": %q},
@@ -253,7 +308,7 @@ func TestCoinDescriptionTruncated(t *testing.T) {
     "high_24h": {"usd": 1.1},
     "low_24h": {"usd": 0.9}
   }
-}`, longDesc)
+}`, string(longDesc))
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, coinJSON)
@@ -295,11 +350,60 @@ func TestTrendingParsesItems(t *testing.T) {
 	if items[0].Symbol != "PEPE" {
 		t.Errorf("items[0].Symbol = %q, want PEPE", items[0].Symbol)
 	}
-	if items[0].Rank != 30 {
-		t.Errorf("items[0].Rank = %d, want 30", items[0].Rank)
+	if items[0].MarketCapRank != 30 {
+		t.Errorf("items[0].MarketCapRank = %d, want 30", items[0].MarketCapRank)
+	}
+	if items[0].PriceBTC != 0.0000001 {
+		t.Errorf("items[0].PriceBTC = %v, want 0.0000001", items[0].PriceBTC)
 	}
 	if items[1].ID != "solana" {
 		t.Errorf("items[1].ID = %q, want solana", items[1].ID)
+	}
+}
+
+// --- coins list ---
+
+func TestCoinsListParsesItems(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/coins/list" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		_, _ = fmt.Fprint(w, fakeCoinsListJSON)
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	items, err := c.Coins(context.Background(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("len(items) = %d, want 3", len(items))
+	}
+	if items[0].ID != "bitcoin" {
+		t.Errorf("items[0].ID = %q, want bitcoin", items[0].ID)
+	}
+	if items[0].Symbol != "btc" {
+		t.Errorf("items[0].Symbol = %q, want btc", items[0].Symbol)
+	}
+	if items[0].Name != "Bitcoin" {
+		t.Errorf("items[0].Name = %q, want Bitcoin", items[0].Name)
+	}
+}
+
+func TestCoinsListLimit(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, fakeCoinsListJSON)
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	items, err := c.Coins(context.Background(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Errorf("len(items) = %d, want 2 (limit applied)", len(items))
 	}
 }
 

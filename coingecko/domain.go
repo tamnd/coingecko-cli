@@ -54,11 +54,25 @@ func (Domain) Register(app *kit.App) {
 	}, priceOp)
 
 	kit.Handle(app, kit.OpMeta{
+		Name:    "trending",
+		Group:   "read",
+		List:    true,
+		Summary: "List currently trending coins (most searched in 24h)",
+	}, trendingOp)
+
+	kit.Handle(app, kit.OpMeta{
 		Name:    "markets",
 		Group:   "read",
 		List:    true,
 		Summary: "List coins ranked by market capitalisation",
 	}, marketsOp)
+
+	kit.Handle(app, kit.OpMeta{
+		Name:    "coins",
+		Group:   "read",
+		List:    true,
+		Summary: "List all coin IDs (useful for finding the right ID string)",
+	}, coinsOp)
 
 	kit.Handle(app, kit.OpMeta{
 		Name:    "coin",
@@ -67,13 +81,6 @@ func (Domain) Register(app *kit.App) {
 		Summary: "Get full detail for a specific coin",
 		Args:    []kit.Arg{{Name: "id", Help: "coin ID e.g. bitcoin"}},
 	}, coinOp)
-
-	kit.Handle(app, kit.OpMeta{
-		Name:    "trending",
-		Group:   "read",
-		List:    true,
-		Summary: "List currently trending coins (most searched in 24h)",
-	}, trendingOp)
 }
 
 // newClient builds the client from host-resolved config.
@@ -97,16 +104,26 @@ func newClient(_ context.Context, cfg kit.Config) (any, error) {
 // --- inputs ---
 
 type priceInput struct {
-	IDs      []string `kit:"arg,variadic" help:"coin IDs e.g. bitcoin ethereum"`
-	Currency string   `kit:"flag" help:"vs currency" default:"usd"`
-	Client   *Client  `kit:"inject"`
+	IDs        []string `kit:"arg,variadic" help:"coin IDs e.g. bitcoin ethereum"`
+	Currency   string   `kit:"flag" help:"vs currency (single)" default:"usd"`
+	Currencies string   `kit:"flag" help:"comma-separated vs currencies e.g. usd,eur,btc"`
+	Client     *Client  `kit:"inject"`
+}
+
+type trendingInput struct {
+	Client *Client `kit:"inject"`
 }
 
 type marketsInput struct {
 	Currency string  `kit:"flag" help:"vs currency" default:"usd"`
-	Limit    int     `kit:"flag,inherit" help:"max results" default:"20"`
+	Limit    int     `kit:"flag,inherit" help:"max results" default:"25"`
 	Page     int     `kit:"flag" help:"page number (1-indexed)" default:"1"`
 	Client   *Client `kit:"inject"`
+}
+
+type coinsInput struct {
+	Limit  int     `kit:"flag,inherit" help:"max results (0 = all)" default:"100"`
+	Client *Client `kit:"inject"`
 }
 
 type coinInput struct {
@@ -114,18 +131,26 @@ type coinInput struct {
 	Client *Client `kit:"inject"`
 }
 
-type trendingInput struct {
-	Client *Client `kit:"inject"`
-}
-
 // --- handlers ---
 
 func priceOp(ctx context.Context, in priceInput, emit func(Price) error) error {
-	currency := in.Currency
-	if currency == "" {
-		currency = "usd"
+	var currencies []string
+	if in.Currencies != "" {
+		for _, c := range strings.Split(in.Currencies, ",") {
+			c = strings.TrimSpace(c)
+			if c != "" {
+				currencies = append(currencies, c)
+			}
+		}
 	}
-	prices, err := in.Client.Price(ctx, in.IDs, currency)
+	if len(currencies) == 0 {
+		cur := in.Currency
+		if cur == "" {
+			cur = "usd"
+		}
+		currencies = []string{cur}
+	}
+	prices, err := in.Client.Price(ctx, in.IDs, currencies...)
 	if err != nil {
 		return err
 	}
@@ -137,14 +162,27 @@ func priceOp(ctx context.Context, in priceInput, emit func(Price) error) error {
 	return nil
 }
 
-func marketsOp(ctx context.Context, in marketsInput, emit func(Market) error) error {
+func trendingOp(ctx context.Context, in trendingInput, emit func(TrendingCoin) error) error {
+	items, err := in.Client.Trending(ctx)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := emit(item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func marketsOp(ctx context.Context, in marketsInput, emit func(MarketCoin) error) error {
 	currency := in.Currency
 	if currency == "" {
 		currency = "usd"
 	}
 	limit := in.Limit
 	if limit <= 0 {
-		limit = 20
+		limit = 25
 	}
 	page := in.Page
 	if page <= 0 {
@@ -162,16 +200,12 @@ func marketsOp(ctx context.Context, in marketsInput, emit func(Market) error) er
 	return nil
 }
 
-func coinOp(ctx context.Context, in coinInput, emit func(Coin) error) error {
-	d, err := in.Client.CoinDetail(ctx, in.ID)
-	if err != nil {
-		return err
+func coinsOp(ctx context.Context, in coinsInput, emit func(CoinInfo) error) error {
+	limit := in.Limit
+	if limit < 0 {
+		limit = 0
 	}
-	return emit(d)
-}
-
-func trendingOp(ctx context.Context, in trendingInput, emit func(Trending) error) error {
-	items, err := in.Client.Trending(ctx)
+	items, err := in.Client.Coins(ctx, limit)
 	if err != nil {
 		return err
 	}
@@ -181,6 +215,14 @@ func trendingOp(ctx context.Context, in trendingInput, emit func(Trending) error
 		}
 	}
 	return nil
+}
+
+func coinOp(ctx context.Context, in coinInput, emit func(Coin) error) error {
+	d, err := in.Client.CoinDetail(ctx, in.ID)
+	if err != nil {
+		return err
+	}
+	return emit(d)
 }
 
 // --- Resolver: pure string functions, no network ---
