@@ -1,6 +1,6 @@
 // Package coingecko is the library behind the coingecko command line:
 // the HTTP client, request shaping, and the typed data models for the CoinGecko
-// public API (markets and trending).
+// public API.
 //
 // The free CoinGecko API requires no key. The client paces requests at a
 // 2-second floor to stay well within the ~30 req/min free-tier limit, and
@@ -20,7 +20,7 @@ import (
 )
 
 // Host is the site this client talks to.
-const Host = "coingecko.com"
+const Host = "api.coingecko.com"
 
 // Config holds all tunable parameters for the Client.
 type Config struct {
@@ -58,121 +58,127 @@ func NewClient(cfg Config) *Client {
 	}
 }
 
-// Markets returns the top n coins by market capitalisation descending.
-// Pass limit <= 0 to use the default of 20.
-func (c *Client) Markets(ctx context.Context, limit int) ([]Coin, error) {
-	n := limit
-	if n <= 0 {
-		n = 20
-	}
-	u := fmt.Sprintf("%s/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=%d&sparkline=false",
-		c.cfg.BaseURL, n)
-	body, err := c.get(ctx, u)
-	if err != nil {
-		return nil, err
-	}
-	var raw []apiCoin
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("decode markets: %w", err)
-	}
-	coins := make([]Coin, 0, len(raw))
-	for i, r := range raw {
-		coins = append(coins, Coin{
-			Rank:          i + 1,
-			ID:            r.ID,
-			Symbol:        r.Symbol,
-			Name:          r.Name,
-			PriceUSD:      r.CurrentPrice,
-			Change24h:     r.PriceChangePercentage,
-			MarketCapUSD:  r.MarketCap,
-			MarketCapRank: r.MarketCapRank,
-			Volume24hUSD:  r.TotalVolume,
-			URL:           "https://www.coingecko.com/en/coins/" + r.ID,
-		})
-	}
-	if limit > 0 && limit < len(coins) {
-		coins = coins[:limit]
-	}
-	return coins, nil
-}
-
-// Markets returns the top n coins by market capitalisation in the given currency.
-// If currency is empty, "usd" is used. Pass limit <= 0 to use the default of 20.
-func (c *Client) MarketsInCurrency(ctx context.Context, currency string, limit int) ([]Coin, error) {
-	if currency == "" {
-		currency = "usd"
-	}
-	n := limit
-	if n <= 0 {
-		n = 20
-	}
-	u := fmt.Sprintf("%s/coins/markets?vs_currency=%s&order=market_cap_desc&per_page=%d&sparkline=false",
-		c.cfg.BaseURL, currency, n)
-	body, err := c.get(ctx, u)
-	if err != nil {
-		return nil, err
-	}
-	var raw []apiCoin
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("decode markets: %w", err)
-	}
-	coins := make([]Coin, 0, len(raw))
-	for i, r := range raw {
-		coins = append(coins, Coin{
-			Rank:          i + 1,
-			ID:            r.ID,
-			Symbol:        r.Symbol,
-			Name:          r.Name,
-			PriceUSD:      r.CurrentPrice,
-			Change24h:     r.PriceChangePercentage,
-			MarketCapUSD:  r.MarketCap,
-			MarketCapRank: r.MarketCapRank,
-			Volume24hUSD:  r.TotalVolume,
-			URL:           "https://www.coingecko.com/en/coins/" + r.ID,
-		})
-	}
-	if limit > 0 && limit < len(coins) {
-		coins = coins[:limit]
-	}
-	return coins, nil
-}
-
 // Price returns prices for the given coin IDs in the given currencies.
-func (c *Client) Price(ctx context.Context, ids []string, currencies []string) (Price, error) {
-	if len(ids) == 0 {
+// Each coin ID in the response becomes one Price struct.
+func (c *Client) Price(ctx context.Context, ids string, currencies string) ([]Price, error) {
+	if ids == "" {
 		return nil, fmt.Errorf("price: at least one coin ID required")
 	}
-	if len(currencies) == 0 {
-		currencies = []string{"usd"}
+	if currencies == "" {
+		currencies = "usd"
 	}
 	u := fmt.Sprintf("%s/simple/price?ids=%s&vs_currencies=%s",
 		c.cfg.BaseURL,
-		strings.Join(ids, ","),
-		strings.Join(currencies, ","))
+		url.QueryEscape(ids),
+		url.QueryEscape(currencies))
 	body, err := c.get(ctx, u)
 	if err != nil {
 		return nil, err
 	}
-	var p Price
-	if err := json.Unmarshal(body, &p); err != nil {
+	// API returns: {"bitcoin":{"usd":64080,"eur":55394},...}
+	var raw map[string]map[string]float64
+	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("decode price: %w", err)
 	}
-	return p, nil
+	// Preserve order from the input ids list.
+	idList := strings.Split(ids, ",")
+	out := make([]Price, 0, len(idList))
+	for _, id := range idList {
+		id = strings.TrimSpace(id)
+		if prices, ok := raw[id]; ok {
+			out = append(out, Price{CoinID: id, Prices: prices})
+		}
+	}
+	return out, nil
 }
 
-// CoinInfo returns the full detail object for a single coin.
-func (c *Client) CoinInfo(ctx context.Context, id string) (CoinDetail, error) {
-	u := fmt.Sprintf("%s/coins/%s?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false",
-		c.cfg.BaseURL, id)
+// Markets returns coins sorted by market cap descending, optionally filtered by
+// a comma-separated list of IDs. Pass limit <= 0 for API default (100).
+func (c *Client) Markets(ctx context.Context, ids string, currency string, limit int) ([]CoinMarket, error) {
+	if currency == "" {
+		currency = "usd"
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	u := fmt.Sprintf("%s/coins/markets?vs_currency=%s&order=market_cap_desc&per_page=%d&sparkline=false",
+		c.cfg.BaseURL, url.QueryEscape(currency), limit)
+	if ids != "" {
+		u += "&ids=" + url.QueryEscape(ids)
+	}
+	body, err := c.get(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	var raw []apiCoin
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("decode markets: %w", err)
+	}
+	out := make([]CoinMarket, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, CoinMarket{
+			ID:                r.ID,
+			Symbol:            r.Symbol,
+			Name:              r.Name,
+			CurrentPrice:      r.CurrentPrice,
+			MarketCap:         r.MarketCap,
+			MarketCapRank:     r.MarketCapRank,
+			PriceChange24h:    r.PriceChangePercentage,
+			TotalVolume:       r.TotalVolume,
+			CirculatingSupply: r.CirculatingSupply,
+			ATH:               r.ATH,
+		})
+	}
+	return out, nil
+}
+
+// Coin returns the full detail object for a single coin.
+func (c *Client) Coin(ctx context.Context, id string) (CoinDetail, error) {
+	u := fmt.Sprintf("%s/coins/%s?localization=false&tickers=false&community_data=false&developer_data=false&sparkline=false",
+		c.cfg.BaseURL, url.PathEscape(id))
 	body, err := c.get(ctx, u)
 	if err != nil {
 		return CoinDetail{}, err
 	}
-	var d CoinDetail
+	var d apiCoinDetail
 	if err := json.Unmarshal(body, &d); err != nil {
 		return CoinDetail{}, fmt.Errorf("decode coin: %w", err)
 	}
-	return d, nil
+	return CoinDetail{
+		ID:           d.ID,
+		Symbol:       d.Symbol,
+		Name:         d.Name,
+		Description:  d.Description["en"],
+		GenesisDate:  d.GenesisDate,
+		CurrentUSD:   d.MarketData.CurrentPrice["usd"],
+		MarketCapUSD: d.MarketData.MarketCap["usd"],
+		ATH_USD:      d.MarketData.ATH["usd"],
+		Change24h:    d.MarketData.PriceChangePct24h,
+	}, nil
+}
+
+// Trending returns the currently trending coins (most searched in the last 24h).
+func (c *Client) Trending(ctx context.Context) ([]TrendingCoin, error) {
+	u := c.cfg.BaseURL + "/search/trending"
+	body, err := c.get(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	var resp trendingResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("decode trending: %w", err)
+	}
+	out := make([]TrendingCoin, 0, len(resp.Coins))
+	for _, w := range resp.Coins {
+		out = append(out, TrendingCoin{
+			ID:            w.Item.ID,
+			Symbol:        w.Item.Symbol,
+			Name:          w.Item.Name,
+			MarketCapRank: w.Item.MarketCapRank,
+			PriceBTC:      w.Item.PriceBTC,
+		})
+	}
+	return out, nil
 }
 
 // Search searches for coins matching the given query string.
@@ -189,32 +195,7 @@ func (c *Client) Search(ctx context.Context, query string) ([]SearchResult, erro
 	return sr.Coins, nil
 }
 
-// Trending returns the currently trending coins (most searched in the last 24h).
-func (c *Client) Trending(ctx context.Context) ([]TrendingCoin, error) {
-	u := c.cfg.BaseURL + "/search/trending"
-	body, err := c.get(ctx, u)
-	if err != nil {
-		return nil, err
-	}
-	var resp trendingResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("decode trending: %w", err)
-	}
-	coins := make([]TrendingCoin, 0, len(resp.Coins))
-	for i, w := range resp.Coins {
-		coins = append(coins, TrendingCoin{
-			Rank:          i + 1,
-			ID:            w.Item.ID,
-			Symbol:        w.Item.Symbol,
-			Name:          w.Item.Name,
-			MarketCapRank: w.Item.MarketCapRank,
-			URL:           "https://www.coingecko.com/en/coins/" + w.Item.ID,
-		})
-	}
-	return coins, nil
-}
-
-func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
+func (c *Client) get(ctx context.Context, rawURL string) ([]byte, error) {
 	var lastErr error
 	for attempt := 0; attempt <= c.cfg.Retries; attempt++ {
 		if attempt > 0 {
@@ -224,7 +205,7 @@ func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
 			case <-time.After(backoff(attempt)):
 			}
 		}
-		body, retry, err := c.do(ctx, url)
+		body, retry, err := c.do(ctx, rawURL)
 		if err == nil {
 			return body, nil
 		}
@@ -233,7 +214,7 @@ func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
 			return nil, err
 		}
 	}
-	return nil, fmt.Errorf("get %s: %w", url, lastErr)
+	return nil, fmt.Errorf("get %s: %w", rawURL, lastErr)
 }
 
 func (c *Client) do(ctx context.Context, rawURL string) ([]byte, bool, error) {
