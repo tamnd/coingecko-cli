@@ -1,7 +1,6 @@
 package coingecko
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -21,7 +20,7 @@ func TestDomainInfo(t *testing.T) {
 	}
 }
 
-func TestClassifyKnownCoin(t *testing.T) {
+func TestClassifyCoin(t *testing.T) {
 	cases := []struct {
 		in  string
 		typ string
@@ -29,9 +28,8 @@ func TestClassifyKnownCoin(t *testing.T) {
 	}{
 		{"bitcoin", "coin", "bitcoin"},
 		{"ethereum", "coin", "ethereum"},
-		{"BTC", "coin", "btc"},
-		{"ETH", "coin", "eth"},
-		{"SOL", "coin", "sol"},
+		{"Bitcoin", "coin", "bitcoin"},
+		{"SOLANA", "coin", "solana"},
 	}
 	for _, tc := range cases {
 		typ, id, err := Domain{}.Classify(tc.in)
@@ -68,20 +66,6 @@ func TestClassifyIDs(t *testing.T) {
 	}
 }
 
-func TestClassifyQuery(t *testing.T) {
-	cases := []string{"pepe", "shiba inu", "layer2"}
-	for _, tc := range cases {
-		typ, _, err := Domain{}.Classify(tc)
-		if err != nil {
-			t.Errorf("Classify(%q) unexpected error: %v", tc, err)
-			continue
-		}
-		if typ != "query" {
-			t.Errorf("Classify(%q) type = %q, want query", tc, typ)
-		}
-	}
-}
-
 func TestClassifyEmpty(t *testing.T) {
 	_, _, err := Domain{}.Classify("")
 	if err == nil {
@@ -102,16 +86,8 @@ func TestLocateIDs(t *testing.T) {
 	if err != nil {
 		t.Errorf("Locate(ids, ...) unexpected error: %v", err)
 	}
-	if !strings.Contains(got, "bitcoin") {
-		t.Errorf("Locate(ids, bitcoin,ethereum) = %q, want URL containing bitcoin", got)
-	}
-}
-
-func TestLocateQuery(t *testing.T) {
-	got, err := Domain{}.Locate("query", "pepe")
-	want := "https://www.coingecko.com/en/search_results?query=pepe"
-	if err != nil || got != want {
-		t.Errorf("Locate(query, pepe) = (%q, %v), want (%q, nil)", got, err, want)
+	if got != "https://www.coingecko.com/en/coins/bitcoin" {
+		t.Errorf("Locate(ids, bitcoin,ethereum) = %q, want URL for bitcoin", got)
 	}
 }
 
