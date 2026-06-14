@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/tamnd/coingecko-cli/coingecko"
@@ -21,8 +22,8 @@ func newTestClient(ts *httptest.Server) *coingecko.Client {
 // --- fixture JSON ---
 
 const fakePriceJSON = `{
-  "bitcoin": {"usd": 64080, "eur": 55394},
-  "ethereum": {"usd": 1664, "eur": 1438}
+  "bitcoin": {"usd": 64080},
+  "ethereum": {"usd": 2430}
 }`
 
 const fakeMarketsJSON = `[
@@ -35,20 +36,22 @@ const fakeMarketsJSON = `[
     "market_cap_rank": 1,
     "price_change_percentage_24h": 1.23,
     "total_volume": 18234567890,
-    "circulating_supply": 19700000,
-    "ath": 73750.07
+    "high_24h": 64214,
+    "low_24h": 63600,
+    "circulating_supply": 19700000
   },
   {
     "id": "ethereum",
     "symbol": "eth",
     "name": "Ethereum",
-    "current_price": 1664,
-    "market_cap": 202000000000,
+    "current_price": 2430,
+    "market_cap": 292000000000,
     "market_cap_rank": 2,
     "price_change_percentage_24h": -0.5,
     "total_volume": 8000000000,
-    "circulating_supply": 120000000,
-    "ath": 4891.70
+    "high_24h": 2450,
+    "low_24h": 2400,
+    "circulating_supply": 120000000
   }
 ]`
 
@@ -56,31 +59,23 @@ const fakeCoinJSON = `{
   "id": "bitcoin",
   "symbol": "btc",
   "name": "Bitcoin",
-  "genesis_date": "2009-01-03",
   "description": {"en": "Bitcoin is a decentralized digital currency."},
   "market_data": {
-    "current_price": {"usd": 64014, "eur": 55300},
+    "current_price": {"usd": 64014},
     "market_cap": {"usd": 1261234567890},
-    "ath": {"usd": 73750.07},
-    "price_change_percentage_24h": 1.23
+    "total_volume": {"usd": 28000000000},
+    "high_24h": {"usd": 64214},
+    "low_24h": {"usd": 63600}
   }
 }`
 
 const fakeTrendingJSON = `{
   "coins": [
-    {"item": {"id": "pepe", "symbol": "PEPE", "name": "Pepe", "market_cap_rank": 30, "price_btc": 1.23e-7}},
-    {"item": {"id": "solana", "symbol": "SOL", "name": "Solana", "market_cap_rank": 5, "price_btc": 0.00025}}
+    {"item": {"id": "pepe", "symbol": "PEPE", "name": "Pepe", "market_cap_rank": 30}},
+    {"item": {"id": "solana", "symbol": "SOL", "name": "Solana", "market_cap_rank": 5}}
   ],
   "nfts": [],
   "categories": []
-}`
-
-const fakeSearchJSON = `{
-  "coins": [
-    {"id": "bitcoin", "name": "Bitcoin", "symbol": "BTC", "market_cap_rank": 1},
-    {"id": "bitcoin-cash", "name": "Bitcoin Cash", "symbol": "BCH", "market_cap_rank": 18}
-  ],
-  "exchanges": []
 }`
 
 // --- price ---
@@ -95,27 +90,27 @@ func TestPriceParsesCoins(t *testing.T) {
 	defer ts.Close()
 
 	c := newTestClient(ts)
-	prices, err := c.Price(context.Background(), "bitcoin,ethereum", "usd,eur")
+	prices, err := c.Price(context.Background(), []string{"bitcoin", "ethereum"}, "usd")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(prices) != 2 {
 		t.Fatalf("len(prices) = %d, want 2", len(prices))
 	}
-	if prices[0].CoinID != "bitcoin" {
-		t.Errorf("prices[0].CoinID = %q, want bitcoin", prices[0].CoinID)
+	if prices[0].ID != "bitcoin" {
+		t.Errorf("prices[0].ID = %q, want bitcoin", prices[0].ID)
 	}
-	if prices[0].Prices["usd"] != 64080 {
-		t.Errorf("bitcoin usd = %v, want 64080", prices[0].Prices["usd"])
+	if prices[0].Currency != "usd" {
+		t.Errorf("prices[0].Currency = %q, want usd", prices[0].Currency)
 	}
-	if prices[0].Prices["eur"] != 55394 {
-		t.Errorf("bitcoin eur = %v, want 55394", prices[0].Prices["eur"])
+	if prices[0].Price != 64080 {
+		t.Errorf("bitcoin price = %v, want 64080", prices[0].Price)
 	}
-	if prices[1].CoinID != "ethereum" {
-		t.Errorf("prices[1].CoinID = %q, want ethereum", prices[1].CoinID)
+	if prices[1].ID != "ethereum" {
+		t.Errorf("prices[1].ID = %q, want ethereum", prices[1].ID)
 	}
-	if prices[1].Prices["usd"] != 1664 {
-		t.Errorf("ethereum usd = %v, want 1664", prices[1].Prices["usd"])
+	if prices[1].Price != 2430 {
+		t.Errorf("ethereum price = %v, want 2430", prices[1].Price)
 	}
 }
 
@@ -126,7 +121,7 @@ func TestPriceRequiresIDs(t *testing.T) {
 	defer ts.Close()
 
 	c := newTestClient(ts)
-	_, err := c.Price(context.Background(), "", "usd")
+	_, err := c.Price(context.Background(), nil, "usd")
 	if err == nil {
 		t.Error("Price with empty IDs should return error")
 	}
@@ -144,7 +139,7 @@ func TestMarketsParsesItems(t *testing.T) {
 	defer ts.Close()
 
 	c := newTestClient(ts)
-	items, err := c.Markets(context.Background(), "", "usd", 10)
+	items, err := c.Markets(context.Background(), "usd", 10, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,17 +152,20 @@ func TestMarketsParsesItems(t *testing.T) {
 	if items[0].Symbol != "btc" {
 		t.Errorf("items[0].Symbol = %q, want btc", items[0].Symbol)
 	}
-	if items[0].CurrentPrice != 64079 {
-		t.Errorf("items[0].CurrentPrice = %v, want 64079", items[0].CurrentPrice)
+	if items[0].Rank != 1 {
+		t.Errorf("items[0].Rank = %d, want 1", items[0].Rank)
 	}
-	if items[0].MarketCapRank != 1 {
-		t.Errorf("items[0].MarketCapRank = %d, want 1", items[0].MarketCapRank)
+	// Price is formatted as a string
+	if items[0].Price != "64079.00" {
+		t.Errorf("items[0].Price = %q, want 64079.00", items[0].Price)
 	}
-	if items[0].ATH != 73750.07 {
-		t.Errorf("items[0].ATH = %v, want 73750.07", items[0].ATH)
+	// Change24h should have a percent sign
+	if !strings.HasSuffix(items[0].Change24h, "%") {
+		t.Errorf("items[0].Change24h = %q, expected percent sign", items[0].Change24h)
 	}
-	if items[1].PriceChange24h >= 0 {
-		t.Errorf("items[1].PriceChange24h = %v, want negative", items[1].PriceChange24h)
+	// Negative change for ethereum
+	if !strings.HasPrefix(items[1].Change24h, "-") {
+		t.Errorf("items[1].Change24h = %q, expected negative", items[1].Change24h)
 	}
 }
 
@@ -180,7 +178,7 @@ func TestMarketsPassesCurrencyParam(t *testing.T) {
 	defer ts.Close()
 
 	c := newTestClient(ts)
-	_, err := c.Markets(context.Background(), "", "eur", 5)
+	_, err := c.Markets(context.Background(), "eur", 5, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,21 +187,21 @@ func TestMarketsPassesCurrencyParam(t *testing.T) {
 	}
 }
 
-func TestMarketsPassesIDsParam(t *testing.T) {
-	var gotIDs string
+func TestMarketsPassesPageParam(t *testing.T) {
+	var gotPage string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotIDs = r.URL.Query().Get("ids")
+		gotPage = r.URL.Query().Get("page")
 		_, _ = fmt.Fprint(w, fakeMarketsJSON)
 	}))
 	defer ts.Close()
 
 	c := newTestClient(ts)
-	_, err := c.Markets(context.Background(), "bitcoin,ethereum", "usd", 10)
+	_, err := c.Markets(context.Background(), "usd", 10, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotIDs != "bitcoin,ethereum" {
-		t.Errorf("ids = %q, want bitcoin,ethereum", gotIDs)
+	if gotPage != "2" {
+		t.Errorf("page = %q, want 2", gotPage)
 	}
 }
 
@@ -219,7 +217,7 @@ func TestCoinParsesDetail(t *testing.T) {
 	defer ts.Close()
 
 	c := newTestClient(ts)
-	d, err := c.Coin(context.Background(), "bitcoin")
+	d, err := c.CoinDetail(context.Background(), "bitcoin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,23 +227,46 @@ func TestCoinParsesDetail(t *testing.T) {
 	if d.Symbol != "btc" {
 		t.Errorf("Symbol = %q, want btc", d.Symbol)
 	}
-	if d.CurrentUSD != 64014 {
-		t.Errorf("CurrentUSD = %v, want 64014", d.CurrentUSD)
-	}
-	if d.MarketCapUSD != 1261234567890 {
-		t.Errorf("MarketCapUSD = %v, want 1261234567890", d.MarketCapUSD)
-	}
-	if d.ATH_USD != 73750.07 {
-		t.Errorf("ATH_USD = %v, want 73750.07", d.ATH_USD)
-	}
-	if d.Change24h != 1.23 {
-		t.Errorf("Change24h = %v, want 1.23", d.Change24h)
+	if d.Price != "64014.00" {
+		t.Errorf("Price = %q, want 64014.00", d.Price)
 	}
 	if d.Description == "" {
 		t.Error("Description is empty")
 	}
-	if d.GenesisDate != "2009-01-03" {
-		t.Errorf("GenesisDate = %q, want 2009-01-03", d.GenesisDate)
+	if d.High24h != "64214.00" {
+		t.Errorf("High24h = %q, want 64214.00", d.High24h)
+	}
+	if d.Low24h != "63600.00" {
+		t.Errorf("Low24h = %q, want 63600.00", d.Low24h)
+	}
+}
+
+func TestCoinDescriptionTruncated(t *testing.T) {
+	longDesc := strings.Repeat("x", 500)
+	coinJSON := fmt.Sprintf(`{
+  "id": "testcoin", "symbol": "tc", "name": "Test",
+  "description": {"en": %q},
+  "market_data": {
+    "current_price": {"usd": 1.0},
+    "market_cap": {"usd": 1000000},
+    "total_volume": {"usd": 500000},
+    "high_24h": {"usd": 1.1},
+    "low_24h": {"usd": 0.9}
+  }
+}`, longDesc)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, coinJSON)
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	d, err := c.CoinDetail(context.Background(), "testcoin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Description) > 300 {
+		t.Errorf("Description length = %d, want <= 300", len(d.Description))
 	}
 }
 
@@ -274,44 +295,11 @@ func TestTrendingParsesItems(t *testing.T) {
 	if items[0].Symbol != "PEPE" {
 		t.Errorf("items[0].Symbol = %q, want PEPE", items[0].Symbol)
 	}
-	if items[0].MarketCapRank != 30 {
-		t.Errorf("items[0].MarketCapRank = %d, want 30", items[0].MarketCapRank)
+	if items[0].Rank != 30 {
+		t.Errorf("items[0].Rank = %d, want 30", items[0].Rank)
 	}
-	if items[0].PriceBTC != 1.23e-7 {
-		t.Errorf("items[0].PriceBTC = %v, want 1.23e-7", items[0].PriceBTC)
-	}
-}
-
-// --- search ---
-
-func TestSearchParsesResults(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/search" {
-			t.Errorf("unexpected path %q", r.URL.Path)
-		}
-		if r.URL.Query().Get("query") != "bitcoin" {
-			t.Errorf("query = %q, want bitcoin", r.URL.Query().Get("query"))
-		}
-		_, _ = fmt.Fprint(w, fakeSearchJSON)
-	}))
-	defer ts.Close()
-
-	c := newTestClient(ts)
-	results, err := c.Search(context.Background(), "bitcoin")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(results) != 2 {
-		t.Fatalf("len(results) = %d, want 2", len(results))
-	}
-	if results[0].ID != "bitcoin" {
-		t.Errorf("results[0].ID = %q, want bitcoin", results[0].ID)
-	}
-	if results[0].Symbol != "BTC" {
-		t.Errorf("results[0].Symbol = %q, want BTC", results[0].Symbol)
-	}
-	if results[0].MarketCapRank != 1 {
-		t.Errorf("results[0].MarketCapRank = %d, want 1", results[0].MarketCapRank)
+	if items[1].ID != "solana" {
+		t.Errorf("items[1].ID = %q, want solana", items[1].ID)
 	}
 }
 
@@ -335,7 +323,7 @@ func TestRetriesOn503(t *testing.T) {
 	cfg.Retries = 3
 	c := coingecko.NewClient(cfg)
 
-	_, err := c.Price(context.Background(), "bitcoin", "usd")
+	_, err := c.Price(context.Background(), []string{"bitcoin"}, "usd")
 	if err != nil {
 		t.Fatal(err)
 	}
