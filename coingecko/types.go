@@ -1,55 +1,52 @@
 package coingecko
 
-// Coin is one entry from the CoinGecko markets listing.
-type Coin struct {
-	Rank          int     `json:"rank"`
-	ID            string  `json:"id"`
-	Symbol        string  `json:"symbol"`
-	Name          string  `json:"name"`
-	PriceUSD      float64 `json:"price_usd"`
-	Change24h     float64 `json:"change_24h"` // percentage
-	MarketCapUSD  float64 `json:"market_cap_usd"`
-	MarketCapRank int     `json:"market_cap_rank"`
-	Volume24hUSD  float64 `json:"volume_24h_usd"`
-	URL           string  `json:"url"` // https://www.coingecko.com/en/coins/{id}
+// Price is a coin's price in one or more currencies.
+type Price struct {
+	CoinID string             `kit:"id" json:"coin_id"`
+	Prices map[string]float64 `json:"prices"`
 }
 
-// TrendingCoin is one entry from the CoinGecko trending search result.
-type TrendingCoin struct {
-	Rank          int    `json:"rank"`
-	ID            string `json:"id"`
-	Symbol        string `json:"symbol"`
-	Name          string `json:"name"`
-	MarketCapRank int    `json:"market_cap_rank"`
-	URL           string `json:"url"`
-}
-
-// Price maps coin ID -> currency -> price value.
-type Price map[string]map[string]float64
-
-// CoinMarketData holds the market_data sub-object from /coins/{id}.
-type CoinMarketData struct {
-	CurrentPrice      map[string]float64 `json:"current_price"`
-	MarketCap         map[string]float64 `json:"market_cap"`
-	PriceChangePct24h float64            `json:"price_change_percentage_24h"`
+// CoinMarket is one entry from the /coins/markets listing.
+type CoinMarket struct {
+	ID                string  `kit:"id" json:"id"`
+	Symbol            string  `json:"symbol"`
+	Name              string  `json:"name"`
+	CurrentPrice      float64 `json:"current_price"`
+	MarketCap         float64 `json:"market_cap"`
+	MarketCapRank     int     `json:"market_cap_rank"`
+	PriceChange24h    float64 `json:"price_change_24h_pct"`
+	TotalVolume       float64 `json:"total_volume"`
+	CirculatingSupply float64 `json:"circulating_supply"`
+	ATH               float64 `json:"ath"`
 }
 
 // CoinDetail is the full coin object returned by /coins/{id}.
 type CoinDetail struct {
-	ID            string            `json:"id"`
-	Symbol        string            `json:"symbol"`
-	Name          string            `json:"name"`
-	MarketCapRank int               `json:"market_cap_rank"`
-	MarketData    CoinMarketData    `json:"market_data"`
-	Description   map[string]string `json:"description"`
-	Categories    []string          `json:"categories"`
+	ID           string  `kit:"id" json:"id"`
+	Symbol       string  `json:"symbol"`
+	Name         string  `json:"name"`
+	Description  string  `json:"description"`
+	GenesisDate  string  `json:"genesis_date"`
+	CurrentUSD   float64 `json:"current_price_usd"`
+	MarketCapUSD float64 `json:"market_cap_usd"`
+	ATH_USD      float64 `json:"ath_usd"`
+	Change24h    float64 `json:"price_change_24h_pct"`
+}
+
+// TrendingCoin is one entry from the /search/trending response.
+type TrendingCoin struct {
+	ID            string  `kit:"id" json:"id"`
+	Symbol        string  `json:"symbol"`
+	Name          string  `json:"name"`
+	MarketCapRank int     `json:"market_cap_rank"`
+	PriceBTC      float64 `json:"price_btc"`
 }
 
 // SearchResult is one coin entry from the /search response.
 type SearchResult struct {
-	ID            string `json:"id"`
-	Symbol        string `json:"symbol"`
+	ID            string `kit:"id" json:"id"`
 	Name          string `json:"name"`
+	Symbol        string `json:"symbol"`
 	MarketCapRank int    `json:"market_cap_rank"`
 }
 
@@ -64,6 +61,22 @@ type apiCoin struct {
 	MarketCap             float64 `json:"market_cap"`
 	MarketCapRank         int     `json:"market_cap_rank"`
 	TotalVolume           float64 `json:"total_volume"`
+	CirculatingSupply     float64 `json:"circulating_supply"`
+	ATH                   float64 `json:"ath"`
+}
+
+type apiCoinDetail struct {
+	ID          string            `json:"id"`
+	Symbol      string            `json:"symbol"`
+	Name        string            `json:"name"`
+	GenesisDate string            `json:"genesis_date"`
+	Description map[string]string `json:"description"`
+	MarketData  struct {
+		CurrentPrice      map[string]float64 `json:"current_price"`
+		MarketCap         map[string]float64 `json:"market_cap"`
+		ATH               map[string]float64 `json:"ath"`
+		PriceChangePct24h float64            `json:"price_change_percentage_24h"`
+	} `json:"market_data"`
 }
 
 type trendingResponse struct {
@@ -75,10 +88,11 @@ type trendingCoinWrapper struct {
 }
 
 type trendingItem struct {
-	ID            string `json:"id"`
-	Symbol        string `json:"symbol"`
-	Name          string `json:"name"`
-	MarketCapRank int    `json:"market_cap_rank"`
+	ID            string  `json:"id"`
+	Symbol        string  `json:"symbol"`
+	Name          string  `json:"name"`
+	MarketCapRank int     `json:"market_cap_rank"`
+	PriceBTC      float64 `json:"price_btc"`
 }
 
 type searchResponse struct {
